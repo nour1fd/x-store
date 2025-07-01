@@ -161,7 +161,6 @@ class OrderSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "total_price", "user"]
 
     def validate_status(self, value):
-        """🛡️ Prevent invalid status transitions"""
         allowed_transitions = {
             "Pending": ["Processing", "Cancelled"],
             "Processing": ["Shipped", "Cancelled"],
@@ -177,19 +176,18 @@ class OrderSerializer(serializers.ModelSerializer):
             and value not in allowed_transitions[instance.status]
         ):
             raise serializers.ValidationError(
-                f"❌ Cannot change order status from {instance.status} to {value}."
+                f"Cannot change order status from {instance.status} to {value}."
             )
 
         return value
 
     def create(self, validated_data):
-        """🚀 Create an order and handle stock deduction properly"""
         items_data = validated_data.pop("items", [])
         # user = validated_data.get("user")
 
         # if not user:
         #     raise serializers.ValidationError(
-        #         {"user": "⚠️ User is required to create an order."}
+        #         {"user": "User is required to create an order."}
         #     )
 
         with transaction.atomic():
@@ -205,41 +203,35 @@ class OrderSerializer(serializers.ModelSerializer):
                         f"Not enough stock for {product.name}."
                     )
 
-                # ✅ Deduct stock
                 product.stock -= quantity
                 product.save()
 
-                # ✅ Create order item
                 price = product.price * quantity  # Add this
                 order_item = OrderItem.objects.create(
                     order=order, product=product, quantity=quantity, price=price
                 )
                 total_price += order_item.price * order_item.quantity
 
-            # ✅ Update total price
             order.total_price = total_price
             order.save()
 
         return order
 
     def update(self, instance, validated_data):
-        """🔄 Update an order with status checks and stock restoration"""
 
         items_data = validated_data.pop("items", None)
         new_status = validated_data.get("status", instance.status)
 
-        # ✅ Step 1: Validate time limit for updates
         if (now() - instance.created_at) > timedelta(
             hours=24
         ) and new_status != instance.status:
             raise serializers.ValidationError(
-                "❌ Order cannot be updated after 24 hours."
+                "Order cannot be updated after 24 hours."
             )
 
-        # ✅ Step 2: Prevent updates if the order is already processed
         if instance.status in ["Shipped", "Delivered"]:
             raise serializers.ValidationError(
-                "⚠️ Order cannot be updated after it has been shipped or delivered."
+                " Order cannot be updated after it has been shipped or delivered."
             )
 
         with transaction.atomic():
@@ -255,7 +247,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
                     if product.stock < quantity:
                         raise serializers.ValidationError(
-                            f"❌ Not enough stock for {product.name}."
+                            f" Not enough stock for {product.name}."
                         )
                     product.stock -= quantity
 
@@ -274,15 +266,12 @@ class OrderSerializer(serializers.ModelSerializer):
 
                     total_price += order_item.price
 
-                # ✅ Remove items that were not updated
                 for product_id in list(existing_items.keys()):
                     if product_id not in [item["product"].id for item in items_data]:
                         existing_items[product_id].delete()
 
-                # ✅ Update total price
                 instance.total_price = total_price
 
-            # ✅ Restore stock if order is cancelled
             if new_status == "Cancelled" and instance.status != "Cancelled":
                 for item in instance.items.all():
                     item.product.stock += item.quantity
